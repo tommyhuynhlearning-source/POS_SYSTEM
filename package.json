@@ -1,0 +1,10 @@
+{
+  "name": "restaurant-pos",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @pos/web --filter @pos/catalog --filter @pos/orders dev",
+    "build": "pnpm --recursive build"
+  }
+}
