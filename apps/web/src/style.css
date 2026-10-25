@@ -150,3 +150,45 @@
 .posShell .searchBox{flex:0 1 360px}
 .posShell .chips{flex:0 0 auto}
 @media(max-width:900px) and (min-width:681px){.posShell .filterRow{flex-wrap:wrap;row-gap:8px}.posShell .searchBox{flex:1 1 280px}}
+
+/* Table service and public reservation flow */
+.posShell .floorPlan{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.posShell .floorTable{min-height:112px;padding:16px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:5px;text-align:left;border:1px solid var(--pos-border);border-radius:10px;background:#fff;color:var(--pos-ink)}
+.posShell .floorTable:hover{border-color:#8ba9a0}
+.posShell .floorTable.occupied{border-color:#b5d7c2;background:#e9f5ed;color:#225b39}
+.posShell .floorTable.reserved{border-color:#ead8a5;background:#fff8e8;color:#72581d}
+.floorTableNumber{font-size:22px;font-weight:650;letter-spacing:-.04em}
+.floorTableStatus{font-size:12px;font-weight:600}
+.floorTable small{font-size:11px;opacity:.78}
+.tableLegend{display:flex;gap:18px;margin:-8px 0 18px;color:var(--pos-muted);font-size:12px}
+.tableLegend span{display:flex;align-items:center;gap:7px}
+.tableDot{width:9px;height:9px;border-radius:50%;background:#dbe2df}
+.tableDot.occupied{background:#44855b}.tableDot.reserved{background:#d0a43d}
+.posShell .reservationSettingsForm{display:grid;gap:18px;margin-top:18px;padding:22px}
+.reservationSettingsForm h2{margin:0 0 5px;font-size:17px}.reservationSettingsForm p{margin:0;color:var(--muted);font-size:13px}
+.reservationSettingsFields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.reservationSettingsFields label,.reservationFields label,.reservationForm>label{display:grid;gap:7px;font-size:12px;color:#586467}
+.reservationSettingsFields input,.reservationSettingsFields select,.reservationFields input,.reservationFields select,.reservationForm>label input{height:40px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:#182326}
+.reservationPage{min-height:100vh;background:#f3f6f4;color:#172124}
+.reservationHeader{height:64px;padding:0 max(24px,calc((100vw - 1120px)/2));display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e2e8e5;background:#f8faf8}
+.reservationHeader>span{font-size:10px;font-weight:600;letter-spacing:.14em;color:#72807c}
+.reservationLayout{width:min(1120px,calc(100% - 48px));margin:54px auto;display:grid;grid-template-columns:minmax(0,.8fr) minmax(420px,1fr);gap:76px;align-items:start}
+.reservationIntro{padding-top:35px}.reservationIntro h1{margin:12px 0 22px;font-size:clamp(42px,6vw,70px);line-height:.97;letter-spacing:-.065em;font-weight:550}.reservationIntro>p:not(.eyebrow){font-size:14px;color:#66736f}
+.reservationForm{display:grid;gap:18px;padding:30px;border:1px solid #e1e7e4;border-radius:12px;background:#fff;box-shadow:0 12px 40px #1b30200d}
+.reservationForm h2{margin:0;font-size:23px;letter-spacing:-.04em}.reservationForm .muted{margin-top:6px}
+.reservationForm>label input{width:100%;height:44px}
+.reservationSlotsLabel{display:flex;justify-content:space-between;gap:12px;font-size:12px;font-weight:600;color:#45534f}
+.reservationSlots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.reservationSlots button{min-height:62px;padding:8px 4px;display:grid;align-content:center;gap:4px;border:1px solid #dfe6e2;border-radius:7px;background:#fff;color:#26332f}
+.reservationSlots button.selected{border-color:#2b7862;background:#edf6f2;color:#205e4c}
+.reservationSlots button:disabled{opacity:.42;background:#f0f2f1;cursor:not-allowed}
+.reservationSlots small{font-size:10px;color:#74807c}
+.reservationFields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.reservationFields input,.reservationFields select{width:100%;height:42px}
+.reservationFields label:last-child{grid-column:1/-1}
+.reservationSuccess{width:min(560px,calc(100% - 36px));margin:12vh auto;padding:48px 36px;text-align:center;border:1px solid #e1e7e4;border-radius:12px;background:#fff}
+.reservationSuccess .successIcon{margin:0 auto 22px}.reservationSuccess h1{margin:8px 0;font-size:34px;letter-spacing:-.05em}.reservationSuccess p:not(.eyebrow){color:#63706c;line-height:1.6}.reservationSuccess small{display:inline-block;margin-top:12px;color:#62716b;font-size:12px}
+@media(max-width:760px){.posShell .reservationSettingsFields{grid-template-columns:1fr}.reservationHeader{height:58px;padding:0 16px}.reservationHeader>span{font-size:8px}.reservationLayout{width:calc(100% - 28px);margin:24px auto;grid-template-columns:1fr;gap:18px}.reservationIntro{padding:8px 4px}.reservationIntro h1{font-size:42px;margin:8px 0 12px}.reservationIntro>p:not(.eyebrow){display:inline-block;margin:0 12px 0 0;font-size:12px}.reservationForm{padding:20px 16px}.reservationSlots{grid-template-columns:repeat(3,minmax(0,1fr))}.reservationFields{grid-template-columns:1fr}.reservationFields label:last-child{grid-column:auto}.reservationSuccess{padding:36px 20px}}
+.posShell .navBadge{display:inline-grid;place-items:center;min-width:17px;height:17px;margin-left:4px;padding:0 4px;border-radius:9px;background:#dcece4;color:#276143;font-size:10px;font-weight:700}
+.posShell .posLayout.fullWorkspace{grid-template-columns:76px minmax(0,1fr)}
+@media(max-width:1100px) and (min-width:681px){.posShell .posLayout.fullWorkspace{grid-template-columns:68px minmax(0,1fr)}}

@@ -4,6 +4,7 @@ import {
   ArrowDownLeft,
   ArrowRight,
   Boxes,
+  CalendarDays,
   Check,
   ChevronDown,
   Clock3,
@@ -16,6 +17,7 @@ import {
   Settings,
   ShoppingBag,
   Utensils,
+  Users,
 } from "lucide-react";
 import "./style.css";
 type Dish = {
@@ -35,6 +37,8 @@ type User = {
   slug: string | null;
 };
 const currency = (import.meta as any).env.VITE_CURRENCY || "USD";
+const localDate = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const locale = currency === "VND" ? "vi-VN" : "en-US";
 const minorFactor =
   10 **
@@ -43,6 +47,12 @@ const minorFactor =
     currency,
   }).resolvedOptions().maximumFractionDigits ?? 2);
 const timezone = (import.meta as any).env.VITE_TIMEZONE || "UTC";
+const restaurantDateTime = (value: string) =>
+  new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: timezone,
+  }).format(new Date(value));
 const money = (n: number) =>
   new Intl.NumberFormat(locale, { style: "currency", currency }).format(
     n / minorFactor,
@@ -63,23 +73,29 @@ async function api(path: string, init: RequestInit = {}) {
 }
 function App() {
   const path = location.pathname;
+  const route = path.split("/").filter(Boolean)[0] || "login";
   const [page, setPage] = useState(
-    path.startsWith("/order/")
-      ? path.includes("/checkout")
-        ? "checkout"
-        : "online"
-      : path === "/register"
-        ? "register"
-        : path === "/login"
-          ? "login"
-          : path === "/checkout"
-            ? "checkout"
-            : path === "/pos"
-              ? "pos"
-              : "login",
+    path.startsWith("/reserve/") || path.startsWith("/order/")
+      ? path.endsWith("/confirmed") && history.state?.reservation
+        ? "reservationSuccess"
+        : "reservation"
+      : [
+            "dashboard",
+            "menu",
+            "promotions",
+            "settings",
+            "register",
+            "login",
+            "checkout",
+            "pos",
+          ].includes(route)
+        ? route
+        : "login",
   );
   const [slug] = useState(
-    path.startsWith("/order/") ? path.split("/")[2] || "" : "",
+    path.startsWith("/order/") || path.startsWith("/reserve/")
+      ? path.split("/")[2] || ""
+      : "",
   );
   const [user, setUser] = useState<User | null>(() => {
     try {
@@ -93,8 +109,8 @@ function App() {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [category, setCategory] = useState("All dishes");
   const [posSection, setPosSection] = useState<
-    "food" | "online" | "settings" | "storage"
-  >("food");
+    "tables" | "food" | "reservations" | "settings" | "storage"
+  >("tables");
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -103,11 +119,24 @@ function App() {
     "CASH" | "CARD" | "QR" | "GIFT"
   >("CASH");
   const [orders, setOrders] = useState<any[]>([]);
+  const [tables, setTables] = useState<any>({ occupied: [], reserved: [] });
+  const [reservations, setReservations] = useState<any[]>([]);
+  const [selectedTable, setSelectedTable] = useState<number | null>(null);
   const [revenue, setRevenue] = useState<any>(null);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [form, setForm] = useState<any>({});
   const [publicMenu, setPublicMenu] = useState<any>(null);
   const [success, setSuccess] = useState<any>(null);
+  const [bookingDate, setBookingDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    return localDate(date);
+  });
+  const [availability, setAvailability] = useState<any[]>([]);
+  const [selectedTime, setSelectedTime] = useState("");
+  const [reservationResult, setReservationResult] = useState<any>(
+    () => history.state?.reservation || null,
+  );
   const [onlinePaymentMethod, setOnlinePaymentMethod] = useState<
     "COD" | "CARD" | "QR"
   >("COD");
@@ -116,23 +145,41 @@ function App() {
   const go = (p: string) => {
     setPage(p);
     const target =
-      p === "online"
-        ? `/order/${slug}`
-        : p === "checkout" && slug
-          ? `/order/${slug}/checkout`
-          : `/${p === "pos" ? "pos" : p}`;
+      p === "reservation"
+        ? `/reserve/${slug}`
+        : p === "reservationSuccess"
+          ? `/reserve/${slug}/confirmed`
+          : p === "online"
+            ? `/order/${slug}`
+            : p === "checkout" && slug
+              ? `/order/${slug}/checkout`
+              : `/${p === "pos" ? "pos" : p}`;
     history.pushState({}, "", target);
     setNotice("");
   };
   useEffect(() => {
-    const f = () =>
+    if (location.pathname.startsWith("/order/") && slug)
+      history.replaceState({}, "", `/reserve/${slug}`);
+    if (
+      location.pathname.endsWith("/confirmed") &&
+      !history.state?.reservation &&
+      slug
+    )
+      history.replaceState({}, "", `/reserve/${slug}`);
+    const f = () => {
+      const reservationRoute =
+        location.pathname.startsWith("/reserve/") ||
+        location.pathname.startsWith("/order/");
+      const confirmation = history.state?.reservation || null;
+      setReservationResult(confirmation);
       setPage(
-        location.pathname.startsWith("/order/")
-          ? location.pathname.includes("/checkout")
-            ? "checkout"
-            : "online"
+        reservationRoute
+          ? location.pathname.endsWith("/confirmed") && confirmation
+            ? "reservationSuccess"
+            : "reservation"
           : location.pathname.slice(1) || "pos",
       );
+    };
     addEventListener("popstate", f);
     return () => removeEventListener("popstate", f);
   }, []);
@@ -145,6 +192,12 @@ function App() {
         setDishes(
           await api(`/api/catalog/restaurants/${m.restaurant.id}/dishes`),
         );
+        const [tableData, reservationData] = await Promise.all([
+          api(`/api/orders/${m.restaurant.id}/tables`),
+          api(`/api/orders/${m.restaurant.id}/reservations`),
+        ]);
+        setTables(tableData);
+        setReservations(reservationData);
         setOrders(await api(`/api/orders/${m.restaurant.id}`));
         setRevenue(await api(`/api/orders/${m.restaurant.id}/revenue`));
         setCampaigns(await api(`/api/orders/${m.restaurant.id}/promotions`));
@@ -163,22 +216,45 @@ function App() {
     if (user) load(user);
   }, [user]);
   useEffect(() => {
-    if (page !== "pos" || posSection !== "online" || !restaurant?.id) return;
+    if (page !== "pos" || !restaurant?.id) return;
     const timer = window.setInterval(
       () =>
-        api(`/api/orders/${restaurant.id}`)
-          .then(setOrders)
-          .catch((e: any) => setNotice(e.message)),
+        Promise.all([
+          api(`/api/orders/${restaurant.id}/tables`).then(setTables),
+          api(`/api/orders/${restaurant.id}/reservations`).then(
+            setReservations,
+          ),
+        ]).catch((e: any) => setNotice(e.message)),
       10000,
     );
     return () => window.clearInterval(timer);
   }, [page, posSection, restaurant?.id]);
   useEffect(() => {
-    if ((page === "online" || page === "checkout") && slug)
+    if (
+      (page === "online" || page === "checkout" || page === "reservation") &&
+      slug
+    )
       api(`/api/catalog/public/${slug}`)
         .then(setPublicMenu)
         .catch((e: any) => setNotice(e.message));
   }, [page, slug]);
+  useEffect(() => {
+    if (page !== "reservation" || !slug || !bookingDate) return;
+    api(
+      `/api/orders/public/${encodeURIComponent(slug)}/availability?date=${bookingDate}`,
+    )
+      .then((data) => {
+        setAvailability(data.slots || []);
+        setSelectedTime((current: string) =>
+          data.slots?.some(
+            (slot: any) => slot.time === current && slot.availableCount > 0,
+          )
+            ? current
+            : "",
+        );
+      })
+      .catch((e: any) => setNotice(e.message));
+  }, [page, slug, bookingDate]);
   const picked = useMemo<Dish[]>(() => {
     const source = slug ? publicMenu?.dishes || [] : dishes;
     return source.filter((d: Dish) => cart[d.id]);
@@ -252,6 +328,37 @@ function App() {
       setNotice(x.message);
     }
   };
+  const selectTable = async (tableNumber: number) => {
+    if (
+      selectedTable !== tableNumber &&
+      Object.values(cart).some((n) => n > 0)
+    ) {
+      setNotice(
+        "Finish checkout for the current table before switching tables.",
+      );
+      return;
+    }
+    const occupied = tables.occupied.some(
+      (table: any) => table.tableNumber === tableNumber,
+    );
+    if (!occupied) {
+      try {
+        await api(`/api/orders/${restaurant.id}/tables/${tableNumber}/open`, {
+          method: "POST",
+        });
+        await api(`/api/orders/${restaurant.id}/tables`).then(setTables);
+        setCart({});
+      } catch (e: any) {
+        setNotice(e.message);
+        await api(`/api/orders/${restaurant.id}/tables`)
+          .then(setTables)
+          .catch(() => {});
+        return;
+      }
+    }
+    setSelectedTable(tableNumber);
+    setPosSection("food");
+  };
   const togglePublish = async () => {
     try {
       const d = await api(`/api/catalog/restaurants/${restaurant.id}/publish`, {
@@ -259,7 +366,7 @@ function App() {
         body: JSON.stringify({ published: !restaurant.published }),
       });
       setRestaurant({ ...restaurant, ...d });
-      setNotice("Menu publishing status updated");
+      setNotice("Online reservation availability updated");
     } catch (x: any) {
       setNotice(x.message);
     }
@@ -294,6 +401,215 @@ function App() {
       setLoading(false);
     }
   };
+  const submitReservation = async (e: any) => {
+    e.preventDefault();
+    if (!selectedTime) return setNotice("Choose an available time");
+    setLoading(true);
+    try {
+      const result = await api(
+        `/api/orders/public/${encodeURIComponent(slug)}/reservations`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: form.reservationName,
+            phone: form.reservationPhone,
+            partySize: Number(form.partySize || 2),
+            date: bookingDate,
+            time: selectedTime,
+          }),
+        },
+      );
+      const confirmation = {
+        id: result.id,
+        restaurantName: result.restaurantName,
+        tableNumber: result.tableNumber,
+        startAt: result.startAt,
+      };
+      setReservationResult(confirmation);
+      history.pushState(
+        { reservation: confirmation },
+        "",
+        `/reserve/${slug}/confirmed`,
+      );
+      setPage("reservationSuccess");
+    } catch (e: any) {
+      setNotice(e.message);
+      api(
+        `/api/orders/public/${encodeURIComponent(slug)}/availability?date=${bookingDate}`,
+      )
+        .then((data) => setAvailability(data.slots || []))
+        .catch(() => {});
+    } finally {
+      setLoading(false);
+    }
+  };
+  if (page === "reservation" || page === "reservationSuccess") {
+    return (
+      <main className="reservationPage">
+        <header className="reservationHeader">
+          <a className="brand" href="/">
+            <span className="brandIcon">
+              <Utensils size={18} />
+            </span>
+            {publicMenu?.name || "Restaurant"}
+          </a>
+          <span>TABLE RESERVATIONS</span>
+        </header>
+        {notice && <div className="notice">{notice}</div>}
+        {page === "reservationSuccess" ? (
+          <section className="reservationSuccess">
+            <div className="successIcon">
+              <Check />
+            </div>
+            <p className="eyebrow">TABLE CONFIRMED</p>
+            <h1>Your table is reserved.</h1>
+            <p>
+              {reservationResult
+                ? `${reservationResult.restaurantName} · Table ${reservationResult.tableNumber} · ${restaurantDateTime(reservationResult.startAt)}`
+                : "Your reservation was confirmed. Contact the restaurant if you need to make a change."}
+            </p>
+            {reservationResult && (
+              <small>
+                Confirmation {reservationResult.id.slice(0, 8).toUpperCase()}
+              </small>
+            )}
+            <div>
+              <button
+                className="textButton"
+                onClick={() => {
+                  setReservationResult(null);
+                  history.pushState({}, "", `/reserve/${slug}`);
+                  setPage("reservation");
+                }}
+              >
+                Make another reservation
+              </button>
+            </div>
+          </section>
+        ) : (
+          <div className="reservationLayout">
+            <section className="reservationIntro">
+              <p className="eyebrow">A PLACE AT THE TABLE</p>
+              <h1>
+                Save your
+                <br />
+                seat.
+              </h1>
+              <p>{publicMenu?.name || "Restaurant"}</p>
+              <p>{publicMenu?.address}</p>
+            </section>
+            <form className="reservationForm" onSubmit={submitReservation}>
+              <div>
+                <p className="eyebrow">ONLINE RESERVATION</p>
+                <h2>Choose a time</h2>
+                <p className="muted">
+                  Available tables update by date and time.
+                </p>
+              </div>
+              <label>
+                Date
+                <input
+                  type="date"
+                  min={localDate(new Date())}
+                  value={bookingDate}
+                  onChange={(e) => setBookingDate(e.target.value)}
+                  required
+                />
+              </label>
+              <div className="reservationSlotsLabel">
+                <span>
+                  Time ·{" "}
+                  {availability.reduce(
+                    (n, x) => n + (x.availableCount > 0 ? 1 : 0),
+                    0,
+                  )}{" "}
+                  slots available · {timezone}
+                </span>
+                <span>
+                  {availability.find((x) => x.time === selectedTime)
+                    ?.availableCount || 0}{" "}
+                  tables left
+                </span>
+              </div>
+              <div className="reservationSlots">
+                {availability.map((slot) => (
+                  <button
+                    key={slot.time}
+                    type="button"
+                    disabled={slot.availableCount === 0}
+                    className={selectedTime === slot.time ? "selected" : ""}
+                    onClick={() => setSelectedTime(slot.time)}
+                  >
+                    <b>{slot.time}</b>
+                    <small>
+                      {slot.availableCount}{" "}
+                      {slot.availableCount === 1 ? "table" : "tables"}
+                    </small>
+                  </button>
+                ))}
+                {!availability.length && (
+                  <p className="hint">
+                    No reservation times are available for this date.
+                  </p>
+                )}
+              </div>
+              <div className="reservationFields">
+                <label>
+                  Your name
+                  <input
+                    autoComplete="name"
+                    required
+                    maxLength={120}
+                    value={form.reservationName || ""}
+                    onChange={(e) =>
+                      setField("reservationName", e.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Phone number
+                  <input
+                    autoComplete="tel"
+                    type="tel"
+                    required
+                    maxLength={40}
+                    value={form.reservationPhone || ""}
+                    onChange={(e) =>
+                      setField("reservationPhone", e.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Guests
+                  <select
+                    value={form.partySize || "2"}
+                    onChange={(e) => setField("partySize", e.target.value)}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n} {n === 1 ? "guest" : "guests"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <button
+                className="primary full"
+                disabled={!selectedTime || loading}
+              >
+                {loading ? "Confirming…" : "Confirm reservation"}
+                <ArrowRight size={16} />
+              </button>
+              <p className="hint">
+                Your booking is confirmed immediately when a table is available.
+                No payment is needed now.
+              </p>
+            </form>
+          </div>
+        )}
+      </main>
+    );
+  }
   if (page === "online")
     return (
       <main className="public publicOrder">
@@ -755,7 +1071,13 @@ function App() {
           <button className="textButton" onClick={() => go("pos")}>
             <ArrowDownLeft size={16} /> Back to POS
           </button>
-          <strong>{restaurant?.name || user.restaurantName} · Checkout</strong>
+          <strong>
+            {restaurant?.name || user.restaurantName}
+            {selectedTable
+              ? ` · Table ${String(selectedTable).padStart(2, "0")}`
+              : ""}{" "}
+            · Checkout
+          </strong>
           <button className="textButton" onClick={logout}>
             <LogOut size={15} /> Sign out
           </button>
@@ -770,6 +1092,7 @@ function App() {
                 method: "POST",
                 body: JSON.stringify({
                   paymentMethod: "CASH",
+                  tableNumber: selectedTable,
                   items: picked.map((x) => ({
                     id: x.id,
                     quantity: cart[x.id],
@@ -778,6 +1101,8 @@ function App() {
               });
               setSuccess(d);
               setCart({});
+              setSelectedTable(null);
+              setPosSection("tables");
               if (user) load(user);
               setPage("success");
             } catch (x: any) {
@@ -788,7 +1113,11 @@ function App() {
           }}
         >
           <p className="eyebrow">CHECKOUT</p>
-          <h1>Review this order</h1>
+          <h1>
+            {selectedTable
+              ? `Table ${String(selectedTable).padStart(2, "0")} · Review order`
+              : "Review this order"}
+          </h1>
           {picked.map((d) => (
             <div className="totalLine" key={d.id}>
               <span>
@@ -863,7 +1192,7 @@ function App() {
         ? "Menu"
         : page === "promotions"
           ? "Promotions"
-          : "Online ordering";
+          : "Online bookings";
   return (
     <main
       className={
@@ -905,7 +1234,7 @@ function App() {
               onClick={() => go("settings")}
               className={page === "settings" ? "active" : ""}
             >
-              <Settings /> Online ordering
+              <Settings /> Online bookings
             </button>
           </div>
           <div className="sideBottom">
@@ -973,10 +1302,20 @@ function App() {
           </div>
         )}
         {page === "pos" && (
-          <div className="posLayout">
+          <div
+            className={`posLayout ${posSection === "food" ? "" : "fullWorkspace"}`}
+          >
             <nav className="posRail" aria-label="POS sections">
               <button
+                className={posSection === "tables" ? "active" : ""}
+                onClick={() => setPosSection("tables")}
+              >
+                <CalendarDays size={20} />
+                <span>Tables</span>
+              </button>
+              <button
                 className={posSection === "food" ? "active" : ""}
+                disabled={!selectedTable}
                 onClick={() => setPosSection("food")}
               >
                 <Utensils size={20} />
@@ -990,11 +1329,28 @@ function App() {
                 <span>Settings</span>
               </button>
               <button
-                className={posSection === "online" ? "active" : ""}
-                onClick={() => setPosSection("online")}
+                className={posSection === "reservations" ? "active" : ""}
+                onClick={() => setPosSection("reservations")}
               >
-                <Receipt size={20} />
-                <span>Order online</span>
+                <Users size={20} />
+                <span>
+                  Reservations
+                  {reservations.some(
+                    (booking) =>
+                      booking.status === "CONFIRMED" &&
+                      new Date(booking.startAt).getTime() > Date.now(),
+                  ) ? (
+                    <small className="navBadge">
+                      {
+                        reservations.filter(
+                          (booking) =>
+                            booking.status === "CONFIRMED" &&
+                            new Date(booking.startAt).getTime() > Date.now(),
+                        ).length
+                      }
+                    </small>
+                  ) : null}
+                </span>
               </button>
               <button
                 className={posSection === "storage" ? "active" : ""}
@@ -1004,6 +1360,84 @@ function App() {
                 <span>Storage</span>
               </button>
             </nav>
+            {posSection === "tables" && (
+              <section className="workspace tablesWorkspace">
+                <div className="pageHeading">
+                  <div>
+                    <p className="eyebrow">FLOOR PLAN</p>
+                    <h1>Tables</h1>
+                    <p className="muted">
+                      {restaurant?.tableCount || 0} tables · select a table to
+                      start service.
+                    </p>
+                  </div>
+                  <button className="subtleButton" onClick={() => load()}>
+                    Refresh
+                  </button>
+                </div>
+                <div className="tableLegend">
+                  <span>
+                    <i className="tableDot available" /> Available
+                  </span>
+                  <span>
+                    <i className="tableDot occupied" /> Occupied
+                  </span>
+                  <span>
+                    <i className="tableDot reserved" /> Reserved now
+                  </span>
+                </div>
+                <div className="floorPlan">
+                  {Array.from(
+                    { length: Number(restaurant?.tableCount || 0) },
+                    (_, i) => i + 1,
+                  ).map((number) => {
+                    const occupied = tables.occupied.find(
+                      (table: any) => table.tableNumber === number,
+                    );
+                    const reserved = tables.reserved.find(
+                      (table: any) => table.tableNumber === number,
+                    );
+                    const status = occupied
+                      ? "occupied"
+                      : reserved
+                        ? "reserved"
+                        : "available";
+                    const reservedForLater =
+                      reserved &&
+                      new Date(reserved.startAt).getTime() > Date.now();
+                    return (
+                      <button
+                        key={number}
+                        className={`floorTable ${status}`}
+                        disabled={!!reservedForLater}
+                        onClick={() => selectTable(number)}
+                      >
+                        <span className="floorTableNumber">
+                          {String(number).padStart(2, "0")}
+                        </span>
+                        <span className="floorTableStatus">
+                          {occupied
+                            ? "Occupied"
+                            : reserved
+                              ? reserved.customerName
+                              : "Available"}
+                        </span>
+                        {occupied && (
+                          <small>
+                            Opened{" "}
+                            {new Date(occupied.openedAt).toLocaleTimeString(
+                              [],
+                              { hour: "2-digit", minute: "2-digit" },
+                            )}
+                          </small>
+                        )}
+                        {reserved && <small>{reserved.partySize} guests</small>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
             {posSection === "food" && (
               <section className="workspace">
                 <div className="pageHeading">
@@ -1011,9 +1445,15 @@ function App() {
                     <p className="eyebrow">
                       {restaurant?.name || "RESTAURANT"}
                     </p>
-                    <h1>Order</h1>
+                    <h1>
+                      {selectedTable
+                        ? `Table ${String(selectedTable).padStart(2, "0")}`
+                        : "Order"}
+                    </h1>
                     <p className="muted">
-                      Choose dishes to add them to this order.
+                      {selectedTable
+                        ? "Choose dishes for this table."
+                        : "Choose dishes to add them to this order."}
                     </p>
                   </div>
                   <span className="datePill">
@@ -1088,104 +1528,80 @@ function App() {
                 )}
               </section>
             )}
-            {posSection === "online" && (
+            {posSection === "reservations" && (
               <section className="workspace">
                 <div className="pageHeading">
                   <div>
-                    <p className="eyebrow">CUSTOMER ORDERS</p>
-                    <h1>Order online</h1>
+                    <p className="eyebrow">TABLE BOOKINGS</p>
+                    <h1>Reservations</h1>
                     <p className="muted">
-                      Orders placed through your restaurant’s public menu.
+                      Online bookings are confirmed automatically when a table
+                      is available.
                     </p>
                   </div>
                   {restaurant?.published ? (
                     <a
                       className="subtleButton"
-                      href={`/order/${restaurant.slug}`}
+                      href={`/reserve/${restaurant.slug}`}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Open customer menu
+                      Open booking page
                     </a>
                   ) : (
                     <button
                       className="subtleButton"
                       onClick={() => go("settings")}
                     >
-                      Enable online menu
+                      Enable online bookings
                     </button>
                   )}
                 </div>
                 <section className="posInfoPanel">
                   <div className="panelHeading">
                     <div>
-                      <h2>Incoming online orders</h2>
-                      <p>
-                        {orders.filter((o) => o.channel === "ONLINE").length}{" "}
-                        orders
-                      </p>
+                      <h2>Upcoming bookings</h2>
+                      <p>{reservations.length} reservations</p>
                     </div>
                     <button className="subtleButton" onClick={() => load()}>
                       Refresh
                     </button>
                   </div>
-                  {orders.filter((o) => o.channel === "ONLINE").length ? (
-                    orders
-                      .filter((o) => o.channel === "ONLINE")
-                      .map((o) => (
-                        <div className="tableRow onlineOrderRow" key={o.id}>
-                          <span>
-                            <b>{o.customerName}</b>
-                            <small>
-                              {o.customerPhone} · {o.customerAddress}
-                            </small>
-                            <small>
-                              {o.items
-                                .map((i: any) => `${i.quantity} × ${i.name}`)
-                                .join(" · ")}
-                            </small>
-                          </span>
-                          <span
-                            className={`status ${o.status === "PAID" ? "paid" : "pending"}`}
-                          >
-                            {o.status === "PAID"
-                              ? "Paid"
-                              : o.paymentMethod === "COD"
-                                ? "Pay on delivery"
-                                : "Awaiting payment"}
-                          </span>
-                          <b>{money(o.totalMinor)}</b>
-                          {o.status === "PENDING_PAYMENT" &&
-                            o.paymentMethod === "COD" && (
-                              <button
-                                className="subtleButton"
-                                onClick={async () => {
-                                  try {
-                                    await api(
-                                      `/api/orders/${restaurant.id}/${o.id}/collect-cod`,
-                                      { method: "POST" },
-                                    );
-                                    await load();
-                                  } catch (e: any) {
-                                    setNotice(e.message);
-                                  }
-                                }}
-                              >
-                                Confirm cash received
-                              </button>
-                            )}
-                        </div>
-                      ))
+                  {reservations.length ? (
+                    reservations.map((booking) => (
+                      <div className="tableRow onlineOrderRow" key={booking.id}>
+                        <span>
+                          <b>{booking.customerName}</b>
+                          <small>
+                            {booking.customerPhone} · {booking.partySize} guests
+                          </small>
+                        </span>
+                        <span
+                          className={`status ${booking.status === "SEATED" ? "paid" : "pending"}`}
+                        >
+                          {booking.status === "SEATED" ? "Seated" : "Confirmed"}
+                        </span>
+                        <b>
+                          Table {String(booking.tableNumber).padStart(2, "0")}
+                        </b>
+                        <time>{restaurantDateTime(booking.startAt)}</time>
+                        {booking.status === "CONFIRMED" &&
+                          new Date(booking.startAt).getTime() <= Date.now() && (
+                            <button
+                              className="subtleButton"
+                              onClick={() => selectTable(booking.tableNumber)}
+                            >
+                              Seat guests
+                            </button>
+                          )}
+                      </div>
+                    ))
                   ) : (
                     <div className="empty compact">
-                      <ShoppingBag />
-                      <p>No online orders yet.</p>
+                      <CalendarDays />
+                      <p>No reservations yet.</p>
                     </div>
                   )}
-                  <p className="hint">
-                    COD orders stay pending until staff confirms the cash was
-                    received. Card and QR payments need provider setup.
-                  </p>
                 </section>
               </section>
             )}
@@ -1270,108 +1686,118 @@ function App() {
                 </section>
               </section>
             )}
-            <aside className={`orderPanel ${mobileCart ? "mobileOpen" : ""}`}>
-              <div className="orderHead">
-                <div>
-                  <p className="eyebrow">CURRENT SALE</p>
-                  <h2>
-                    Order <span className="orderNumber">#01</span>
-                  </h2>
+            {posSection === "food" && (
+              <aside
+                className={`orderPanel ${mobileCart ? "mobileOpen" : ""}`}
+              >
+                <div className="orderHead">
+                  <div>
+                    <p className="eyebrow">
+                      {selectedTable ? "TABLE ORDER" : "ORDER SUMMARY"}
+                    </p>
+                    <h2>
+                      {selectedTable
+                        ? `Table ${String(selectedTable).padStart(2, "0")}`
+                        : "Order"}
+                    </h2>
+                  </div>
+                  <div className="orderActions">
+                    <button
+                      className="iconButton"
+                      onClick={() => setCart({})}
+                      aria-label="Clear order"
+                    >
+                      <Receipt size={18} />
+                    </button>
+                    <button
+                      className="cartCloseButton"
+                      onClick={() => setMobileCart(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
-                <div className="orderActions">
-                  <button
-                    className="iconButton"
-                    onClick={() => setCart({})}
-                    aria-label="Clear order"
-                  >
-                    <Receipt size={18} />
-                  </button>
-                  <button
-                    className="cartCloseButton"
-                    onClick={() => setMobileCart(false)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-              {picked.length ? (
-                <div className="orderLines">
-                  {picked.map((d) => (
-                    <div className="orderLine" key={d.id}>
-                      <div className="lineInfo">
-                        <b>{d.name}</b>
-                        <span>{money(d.priceMinor)} each</span>
+                {picked.length ? (
+                  <div className="orderLines">
+                    {picked.map((d) => (
+                      <div className="orderLine" key={d.id}>
+                        <div className="lineInfo">
+                          <b>{d.name}</b>
+                          <span>{money(d.priceMinor)} each</span>
+                        </div>
+                        <div className="quantity">
+                          <button
+                            aria-label={`Remove one ${d.name}`}
+                            onClick={() =>
+                              setCart((x) => ({
+                                ...x,
+                                [d.id]: Math.max(0, x[d.id] - 1),
+                              }))
+                            }
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <span>{cart[d.id]}</span>
+                          <button
+                            aria-label={`Add one ${d.name}`}
+                            onClick={() =>
+                              setCart((x) => ({ ...x, [d.id]: x[d.id] + 1 }))
+                            }
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                        <b className="lineTotal">
+                          {money(d.priceMinor * cart[d.id])}
+                        </b>
                       </div>
-                      <div className="quantity">
-                        <button
-                          aria-label={`Remove one ${d.name}`}
-                          onClick={() =>
-                            setCart((x) => ({
-                              ...x,
-                              [d.id]: Math.max(0, x[d.id] - 1),
-                            }))
-                          }
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <span>{cart[d.id]}</span>
-                        <button
-                          aria-label={`Add one ${d.name}`}
-                          onClick={() =>
-                            setCart((x) => ({ ...x, [d.id]: x[d.id] + 1 }))
-                          }
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
-                      <b className="lineTotal">
-                        {money(d.priceMinor * cart[d.id])}
-                      </b>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                ) : (
+                  <div className="cartEmpty">
+                    <span className="cartIcon">
+                      <ShoppingBag />
+                    </span>
+                    <b>No items yet</b>
+                    <span>Select food from the menu.</span>
+                  </div>
+                )}
+                <div className="orderFoot">
+                  <div className="totalLine">
+                    <span>Subtotal</span>
+                    <span>{money(total)}</span>
+                  </div>
+                  <div className="totalLine">
+                    <span>Tax</span>
+                    <span>—</span>
+                  </div>
+                  <div className="grandTotal">
+                    <span>Total</span>
+                    <b>{money(total)}</b>
+                  </div>
+                  <button
+                    className="primary full"
+                    disabled={!picked.length}
+                    onClick={() => go("checkout")}
+                  >
+                    Payment <ArrowRight size={17} />
+                  </button>
+                  <p className="hint">Checkout opens as a separate page.</p>
                 </div>
-              ) : (
-                <div className="cartEmpty">
-                  <span className="cartIcon">
-                    <ShoppingBag />
-                  </span>
-                  <b>No items yet</b>
-                  <span>Select food from the menu.</span>
-                </div>
-              )}
-              <div className="orderFoot">
-                <div className="totalLine">
-                  <span>Subtotal</span>
-                  <span>{money(total)}</span>
-                </div>
-                <div className="totalLine">
-                  <span>Tax</span>
-                  <span>—</span>
-                </div>
-                <div className="grandTotal">
-                  <span>Total</span>
-                  <b>{money(total)}</b>
-                </div>
-                <button
-                  className="primary full"
-                  disabled={!picked.length}
-                  onClick={() => go("checkout")}
-                >
-                  Payment <ArrowRight size={17} />
-                </button>
-                <p className="hint">Checkout opens as a separate page.</p>
-              </div>
-            </aside>
-            <button
-              className="mobileCartButton"
-              onClick={() => setMobileCart(!mobileCart)}
-            >
-              <ShoppingBag size={17} />
-              {mobileCart ? "Hide order" : `Order · ${money(total)}`}
-              {picked.length > 0 && (
-                <span>{picked.reduce((n, d) => n + cart[d.id], 0)}</span>
-              )}
-            </button>
+              </aside>
+            )}
+            {posSection === "food" && (
+              <button
+                className="mobileCartButton"
+                onClick={() => setMobileCart(!mobileCart)}
+              >
+                <ShoppingBag size={17} />
+                {mobileCart ? "Hide order" : `Order · ${money(total)}`}
+                {picked.length > 0 && (
+                  <span>{picked.reduce((n, d) => n + cart[d.id], 0)}</span>
+                )}
+              </button>
+            )}
           </div>
         )}
         {page === "dashboard" && (
@@ -1500,8 +1926,8 @@ function App() {
               {restaurant?.slug && (
                 <button className="subtleButton" onClick={togglePublish}>
                   {restaurant.published
-                    ? "Pause online menu"
-                    : "Publish online menu"}
+                    ? "Pause online reservations"
+                    : "Enable online reservations"}
                 </button>
               )}
             </div>
@@ -1605,18 +2031,18 @@ function App() {
           <div className="contentPage">
             <div className="pageHeading">
               <div>
-                <p className="eyebrow">CUSTOMER ORDERS</p>
-                <h1>Online ordering</h1>
+                <p className="eyebrow">TABLE RESERVATIONS</p>
+                <h1>Reservation settings</h1>
                 <p className="muted">
-                  Choose whether customers can open your restaurant menu and
-                  place orders.
+                  Set table capacity and the hours available for online
+                  bookings.
                 </p>
               </div>
             </div>
             <div className="panel settingsPanel">
               <h2>{restaurant?.name}</h2>
               <div className="settingRow">
-                <span>Accept online orders</span>
+                <span>Accept online reservations</span>
                 <button
                   className={`statusToggle ${restaurant?.published ? "isAvailable" : ""}`}
                   onClick={togglePublish}
@@ -1626,21 +2052,99 @@ function App() {
               </div>
               {restaurant?.slug && (
                 <div className="settingRow">
-                  <span>Public order link</span>
+                  <span>Public reservation link</span>
                   <a
-                    href={`/order/${restaurant.slug}`}
+                    href={`/reserve/${restaurant.slug}`}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    {location.origin}/order/{restaurant.slug}
+                    {location.origin}/reserve/{restaurant.slug}
                   </a>
                 </div>
               )}
               <p className="hint">
-                Turn this off to hide the public menu. The restaurant dashboard
-                and POS remain available.
+                When enabled, guests can book one table per one-hour time slot.
               </p>
             </div>
+            <form
+              className="panel reservationSettingsForm"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const updated = await api(
+                    `/api/catalog/restaurants/${restaurant.id}/settings`,
+                    {
+                      method: "PATCH",
+                      body: JSON.stringify({
+                        tableCount: Number(
+                          form.tableCount ?? restaurant.tableCount,
+                        ),
+                        openingTime: form.openingTime || restaurant.openingTime,
+                        closingTime: form.closingTime || restaurant.closingTime,
+                      }),
+                    },
+                  );
+                  setRestaurant({ ...restaurant, ...updated });
+                  setField("tableCount", String(updated.tableCount));
+                  setField("openingTime", updated.openingTime);
+                  setField("closingTime", updated.closingTime);
+                  setNotice("Reservation settings saved");
+                } catch (e: any) {
+                  setNotice(e.message);
+                }
+              }}
+            >
+              <div>
+                <h2>Tables and opening hours</h2>
+                <p>Online bookings use one-hour slots during these hours.</p>
+              </div>
+              <div className="reservationSettingsFields">
+                <label>
+                  Total tables
+                  <input
+                    type="number"
+                    min="1"
+                    max="200"
+                    required
+                    value={form.tableCount ?? restaurant?.tableCount ?? 10}
+                    onChange={(e) => setField("tableCount", e.target.value)}
+                  />
+                </label>
+                <label>
+                  Opens
+                  <select
+                    value={
+                      form.openingTime ?? restaurant?.openingTime ?? "11:00"
+                    }
+                    onChange={(e) => setField("openingTime", e.target.value)}
+                  >
+                    {Array.from(
+                      { length: 24 },
+                      (_, i) => `${String(i).padStart(2, "0")}:00`,
+                    ).map((time) => (
+                      <option key={time}>{time}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Closes
+                  <select
+                    value={
+                      form.closingTime ?? restaurant?.closingTime ?? "22:00"
+                    }
+                    onChange={(e) => setField("closingTime", e.target.value)}
+                  >
+                    {Array.from(
+                      { length: 24 },
+                      (_, i) => `${String(i).padStart(2, "0")}:00`,
+                    ).map((time) => (
+                      <option key={time}>{time}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <button className="primary">Save reservation settings</button>
+            </form>
           </div>
         )}
         {page === "promotions" && (
